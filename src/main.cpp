@@ -124,7 +124,7 @@ void setup() {
 
   // 初始化显示屏
   display.init(115200, true, 2, false);
-  display.setRotation(1);
+  display.setRotation(1); // 横屏模式
 
   // 初始化reader模块的显示
   initDisplay(display);

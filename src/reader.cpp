@@ -7,16 +7,22 @@
 // ============================================================================
 // Text Display Configuration
 // ============================================================================
-const int CHAR_WIDTH = 12;           // 字符宽度（像素）
-const int LINE_HEIGHT = 14;          // 行高（像素）
-const int MARGIN_LEFT = 4;           // 左边距
-const int MARGIN_TOP = 4;            // 上边距
-const int MARGIN_RIGHT = 4;          // 右边距
-const int MARGIN_BOTTOM = 16;        // 下边距（留给页码）
+// 注意：屏幕使用 setRotation(1) 旋转了90度
+// 物理尺寸：250x122，旋转后实际显示尺寸：250x122（宽x高）
+const int SCREEN_WIDTH = EPD_HEIGHT;   // 旋转后的实际宽度 = 122
+const int SCREEN_HEIGHT = EPD_WIDTH;   // 旋转后的实际高度 = 250
 
-const int DISPLAY_WIDTH = EPD_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-const int DISPLAY_HEIGHT = EPD_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
-const int CHARS_PER_LINE = DISPLAY_WIDTH / CHAR_WIDTH;
+const int CHINESE_CHAR_WIDTH = 12;     // 中文字符宽度（像素）- u8g2_font_wqy12_t_gb2312
+const int ASCII_CHAR_WIDTH = 6;        // ASCII字符宽度（像素）
+const int LINE_HEIGHT = 13;            // 行高（像素）
+const int MARGIN_LEFT = 2;             // 左边距
+const int MARGIN_TOP = 2;              // 上边距
+const int MARGIN_RIGHT = 2;            // 右边距
+const int MARGIN_BOTTOM = 14;          // 下边距（留给页码）
+
+const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
+const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+const int CHARS_PER_LINE = DISPLAY_WIDTH / CHINESE_CHAR_WIDTH;  // 按中文字符计算
 const int LINES_PER_PAGE = DISPLAY_HEIGHT / LINE_HEIGHT;
 const int CHARS_PER_PAGE = CHARS_PER_LINE * LINES_PER_PAGE;
 
@@ -45,16 +51,16 @@ int getUTF8CharLength(const char* str, int index) {
   return 1; // 默认
 }
 
-// 计算字符串的显示宽度（中文字符按2计算，ASCII按1计算）
+// 计算字符串的显示宽度（中文字符按12像素计算，ASCII按6像素计算）
 int getStringDisplayWidth(const String& str) {
   int width = 0;
   int i = 0;
   while (i < str.length()) {
     int charLen = getUTF8CharLength(str.c_str(), i);
     if (charLen > 1) {
-      width += 2; // 中文字符宽度
+      width += CHINESE_CHAR_WIDTH; // 中文字符宽度
     } else {
-      width += 1; // ASCII字符宽度
+      width += ASCII_CHAR_WIDTH;   // ASCII字符宽度
     }
     i += charLen;
   }
@@ -100,10 +106,10 @@ void displayText(const String& text, int pageNum, int totalPages) {
 
     while (charIndex < text.length() && lineCount < LINES_PER_PAGE) {
       String line = "";
-      int lineWidth = 0;
+      int linePixelWidth = 0;  // 使用像素宽度而不是字符单位
 
       // 逐字符构建一行
-      while (charIndex < text.length() && lineWidth < CHARS_PER_LINE) {
+      while (charIndex < text.length() && linePixelWidth < DISPLAY_WIDTH) {
         // 检查换行符
         if (text[charIndex] == '\n' || text[charIndex] == '\r') {
           charIndex++;
@@ -119,15 +125,15 @@ void displayText(const String& text, int pageNum, int totalPages) {
         // 提取字符
         String currentChar = text.substring(charIndex, charIndex + charLen);
 
-        // 计算添加此字符后的宽度
-        int charWidth = (charLen > 1) ? 2 : 1;
+        // 计算添加此字符后的像素宽度
+        int charPixelWidth = (charLen > 1) ? CHINESE_CHAR_WIDTH : ASCII_CHAR_WIDTH;
 
-        if (lineWidth + charWidth > CHARS_PER_LINE) {
+        if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) {
           break; // 超出行宽，停止添加
         }
 
         line += currentChar;
-        lineWidth += charWidth;
+        linePixelWidth += charPixelWidth;
         charIndex += charLen;
       }
 
@@ -145,7 +151,7 @@ void displayText(const String& text, int pageNum, int totalPages) {
     u8g2.setFont(u8g2_font_6x10_tf);
     String pageInfo = String(pageNum + 1) + " / " + String(totalPages);
     int pageInfoWidth = pageInfo.length() * 6;
-    u8g2.setCursor((EPD_WIDTH - pageInfoWidth) / 2, EPD_HEIGHT - 4);
+    u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - 4);
     u8g2.print(pageInfo);
 
   } while (displayPtr->nextPage());
@@ -171,12 +177,12 @@ void displayMessage(const String& title, const String& message) {
     // 显示标题 - 使用中号字体
     u8g2.setFont(u8g2_font_wqy12_t_gb2312);
     int titleWidth = title.length() * 6; // 粗略估算
-    u8g2.setCursor((EPD_WIDTH - titleWidth) / 2, 30);
+    u8g2.setCursor((SCREEN_WIDTH - titleWidth) / 2, 30);
     u8g2.print(title);
 
     // 显示消息
     int msgWidth = message.length() * 6;
-    u8g2.setCursor((EPD_WIDTH - msgWidth) / 2, EPD_HEIGHT / 2);
+    u8g2.setCursor((SCREEN_WIDTH - msgWidth) / 2, SCREEN_HEIGHT / 2);
     u8g2.print(message);
 
   } while (displayPtr->nextPage());
