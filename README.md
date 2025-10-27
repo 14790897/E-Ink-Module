@@ -1,55 +1,201 @@
-E-Ink Module (SSD1680) on ESP32-C3
+# E-Ink 小说阅读器
 
-Overview
+基于ESP32-C3和2.13英寸E-Ink显示屏的小说阅读器项目。
 
-- Target: ESP32-C3 (AirM2M CORE ESP32C3) + SSD1680 e-paper
-- Libraries: Adafruit EPD + Adafruit GFX (declared in `platformio.ini`)
-- Demo: Alternates two “fun” pages (smile/sad face + pattern) with full refresh every 15s.
+## 功能特点
 
-Hardware Wiring
+- ✅ **双WiFi模式** - 支持STA模式连接路由器，失败时自动回退到AP模式
+- ✅ **mDNS支持** - 使用 `http://littlebook.local` 轻松访问（STA模式）
+- ✅ **Web管理界面** - 通过浏览器上传和管理小说
+- ✅ **LittleFS文件系统** - 支持存储多本小说文件
+- ✅ **文本自动分页** - 根据屏幕尺寸智能分页显示
+- ✅ **E-Ink显示** - 支持全刷新和局部刷新
+- ✅ **中文支持** - 支持显示中文文本
+- ✅ **页码显示** - 实时显示当前页码和总页数
 
-- Panel resolution (default): `250x122` (typical 2.13" SSD1680). Change in `src/main.cpp` if your panel differs.
-- SPI (remapped to avoid conflicts with DC=5):
-  - `SCK = GPIO4`
-  - `MOSI = GPIO6`
-  - `MISO = GPIO2` (remapped from default 5)
-  - `CS  = GPIO7`
-- EPD control:
-  - `DC   = GPIO5`
-  - `RST  = GPIO10`
-  - `BUSY = GPIO3` (ensure BUSY is correctly wired to match `PIN_BUSY`)
+## 硬件要求
 
-If you use different pins, update them in `src/main.cpp`:
+- ESP32-C3开发板（合宙AIR-M2M Core ESP32-C3）
+- 2.13英寸E-Ink显示屏（DEPG0213BN，SSD1680控制器）
+- 分辨率：250x122像素
 
-- `PIN_CS`, `PIN_DC`, `PIN_RST`, `PIN_BUSY`
-- `SPI.begin(SCK, MISO, MOSI, CS)`
+## 引脚连接
 
-Build & Flash
+根据 `platformio.ini` 配置：
 
-- Build: `pio run`
-- Upload: `pio run -t upload`
-- Serial Monitor: `pio device monitor -b 115200`
+| 功能 | GPIO |
+|------|------|
+| SPI CLK | 2 |
+| SPI MOSI | 3 |
+| SPI MISO | -1 (不使用) |
+| CS | 7 |
+| DC | 6 |
+| RST | 10 |
+| BUSY | 5 |
 
-Key Files
+## 软件依赖
 
-- `platformio.ini`: declares the board (`airm2m_core_esp32c3`) and libraries.
-- `src/main.cpp`: SSD1680 demo using Adafruit EPD + GFX.
+项目自动安装以下库（在 `platformio.ini` 中定义）：
 
-Customization
+- Adafruit GFX Library - 图形绘制
+- GxEPD2 - E-Ink显示驱动
+- ESP Async WebServer - 异步Web服务器
+- ArduinoJson - JSON解析
 
-- Resolution: change `EPD_WIDTH` / `EPD_HEIGHT` to match your panel.
-- Rotation: adjust `display.setRotation(0..3)` for portrait/landscape.
-- Content: edit `drawFace()` / `drawPattern()` or add text/bitmaps via Adafruit GFX.
+## 使用步骤
 
-Troubleshooting
+### 1. 配置WiFi（可选）
 
-- Stuck at init or no refresh: check BUSY wiring and pin definitions (`PIN_BUSY`).
-- Pin conflicts: ensure no overlap between SPI pins and EPD control pins.
-- Wrong image orientation/clipping: verify `EPD_WIDTH/EPD_HEIGHT` and `setRotation`.
-- Ghosting: e-paper requires full refresh; this demo uses full refresh via `display.display()`.
+编辑 `include/secrets.h` 文件，设置您的WiFi信息：
 
-Notes
+```cpp
+#define WIFI_SSID "YOUR_WIFI_NAME"       // 您的WiFi名称
+#define WIFI_PASSWORD "YOUR_PASSWORD"     // 您的WiFi密码
+#define MDNS_HOSTNAME "littlebook"        // mDNS主机名
+```
 
-- The project uses existing, mature libraries (Adafruit EPD/GFX) instead of custom drivers.
-- If you prefer using GxEPD2, it’s also included via `lib_deps`; we can switch on request.
+**WiFi模式说明：**
+- 如果能连接到配置的WiFi，将使用 **STA模式**（推荐）
+- 如果连接失败，会自动回退到 **AP模式**
+  - AP SSID: `EInk-Reader`
+  - AP 密码: `12345678`
 
+### 2. 编译并上传固件
+
+```bash
+# 使用PlatformIO编译并上传
+pio run --target upload
+
+# 或在VS Code中按下 Upload 按钮
+```
+
+### 2. 上传文件系统数据
+
+data目录包含Web界面文件，需要上传到ESP32的LittleFS：
+
+```bash
+# 上传文件系统
+pio run --target uploadfs
+
+# 或在VS Code中使用 "Upload File System image"
+```
+
+### 3. 连接设备
+
+#### 方式A：STA模式（推荐）
+
+如果ESP32成功连接到您的WiFi：
+
+1. 确保您的电脑/手机与ESP32在**同一WiFi网络**
+2. 可以使用以下方式访问：
+   - **mDNS域名**：`http://littlebook.local` （推荐）
+   - **IP地址**：查看串口输出获取IP地址
+
+#### 方式B：AP模式（备用）
+
+如果WiFi连接失败，ESP32会自动创建热点：
+
+1. 连接到WiFi热点：
+   - SSID: `EInk-Reader`
+   - 密码: `12345678`
+2. 访问：`http://192.168.4.1`
+
+### 4. 打开Web界面
+
+- 根据您的连接模式访问相应地址
+- 界面会显示设备状态、书籍列表等信息
+
+### 5. 上传小说
+
+1. 点击"选择TXT文件"按钮
+2. 选择一个TXT格式的小说文件（建议小于2MB）
+3. 点击"上传"按钮
+4. 等待上传完成
+
+### 6. 开始阅读
+
+1. 在书籍列表中点击"阅读"按钮
+2. 小说第一页会显示在E-Ink屏幕上
+3. 可以通过Web界面的翻页按钮控制
+
+## 文件结构
+
+```
+E-Ink Module/
+├── data/                      # LittleFS文件系统数据
+│   ├── index.html            # Web管理界面
+│   ├── app.js                # 前端JavaScript逻辑
+│   └── books/                # 小说存储目录
+│       └── 三体节选.txt      # 示例小说
+├── src/
+│   └── main.cpp              # 主程序
+├── platformio.ini            # PlatformIO配置
+└── README_NOVEL.md           # 本文档
+```
+
+## API接口
+
+Web界面通过REST API与ESP32通信：
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/status` | GET | 获取设备状态（当前页、总页数、当前书籍、存储空间） |
+| `/api/books` | GET | 获取书籍列表 |
+| `/api/upload` | POST | 上传书籍文件 |
+| `/api/read` | POST | 打开书籍开始阅读 |
+| `/api/delete` | POST | 删除书籍 |
+| `/api/next` | POST | 下一页 |
+| `/api/prev` | POST | 上一页 |
+
+## 文本显示参数
+
+在 `main.cpp` 中可以调整显示参数：
+
+```cpp
+const int CHAR_WIDTH = 12;           // 字符宽度（像素）
+const int LINE_HEIGHT = 16;          // 行高（像素）
+const int MARGIN_LEFT = 8;           // 左边距
+const int MARGIN_TOP = 8;            // 上边距
+const int MARGIN_RIGHT = 8;          // 右边距
+const int MARGIN_BOTTOM = 20;        // 下边距
+```
+
+根据这些参数计算：
+- 每行字符数：约 19 字符
+- 每页行数：约 6 行
+- 每页字符数：约 114 字符
+
+## 注意事项
+
+1. **WiFi配置**：
+   - STA模式：修改 `include/secrets.h` 配置WiFi
+   - AP模式：自动启用（SSID: `EInk-Reader`, 密码: `12345678`）
+   - mDNS域名：`littlebook.local`（仅STA模式可用）
+2. **文件大小限制**：建议单个TXT文件不超过2MB
+3. **文件编码**：TXT文件应使用UTF-8编码
+4. **E-Ink刷新**：
+   - 全刷新约需4秒
+   - 局部刷新约需0.75秒
+   - 建议每10次局部刷新后进行一次全刷新以防止残影
+5. **WiFi范围**：
+   - STA模式：取决于您的路由器
+   - AP模式：ESP32热点有效范围约10-20米
+
+## 未来改进
+
+- [ ] 添加物理按钮控制翻页
+- [ ] 支持阅读进度保存
+- [ ] 支持书签功能
+- [ ] 优化中文字符显示
+- [ ] 添加字体大小调节
+- [ ] 支持更多文件格式（EPUB等）
+- [ ] 电池电量显示
+- [ ] 深度睡眠模式以节省电量
+
+## 许可证
+
+MIT License
+
+## 作者
+
+Created with ❤️ for E-Ink reading enthusiasts

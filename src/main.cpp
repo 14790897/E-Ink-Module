@@ -1,230 +1,183 @@
 // ============================================================================
-// Includes
+// E-Ink Novel Reader for ESP32-C3
 // ============================================================================
+// Features:
+// - WiFi AP mode for web interface access
+// - LittleFS file system for storing novels
+// - Web interface for uploading and managing books
+// - Text pagination and display on E-Ink screen
+// - Partial refresh support for fast page turns
+// - Boot button control: Single click (next), Double click (prev), Long press (close)
+// ============================================================================
+
 #include <Arduino.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <SPI.h>
 #include <GxEPD2_BW.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
-#include <Fonts/FreeMonoBold12pt7b.h>
+#include <ESPmDNS.h>
+#include "secrets.h"
+#include "storage.h"
+#include "reader.h"
+#include "api.h"
+#include "button.h"
 
 // ============================================================================
-// Configuration
+// WiFi Configuration
 // ============================================================================
-// All pin definitions and display resolution are configured in platformio.ini
-// as build flags. This allows easy hardware configuration without modifying
-// the source code.
-//
-// Build flags defined in platformio.ini:
-//   - EPD_WIDTH, EPD_HEIGHT: Display resolution (default: 250x122 for 2.13")
-//   - HW_SCK, HW_MOSI, HW_MISO: SPI hardware pins
-//   - PIN_CS, PIN_DC, PIN_RST, PIN_BUSY: E-Paper control pins
+// 从secrets.h读取WiFi配置
+// 如果连接失败，会启动AP模式作为备用
+const char* AP_SSID = "EInk-Reader";      // AP模式的默认SSID
+const char* AP_PASSWORD = "12345678";     // AP模式的默认密码
 
 // ============================================================================
 // Global Objects
 // ============================================================================
-// Create GxEPD2 display instance for SSD1680 (2.13" 250x122 b/w e-paper)
-// GxEPD2_213_BN is for DEPG0213BN panel with SSD1680 controller
 GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT> display(
   GxEPD2_213_BN(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY)
 );
 
-// ============================================================================
-// Constants
-// ============================================================================
-const int FACE_CENTER_X = EPD_WIDTH / 2;
-const int FACE_CENTER_Y = EPD_HEIGHT / 2 + 10;
-const int FACE_RADIUS = min(EPD_WIDTH, EPD_HEIGHT) / 2 - 10;
+AsyncWebServer server(80);
 
 // ============================================================================
-// Display Drawing Functions
+// WiFi Setup
 // ============================================================================
 
-/**
- * @brief Draw a face on the display (happy or sad)
- * @param happy True for happy face, false for sad face
- * @param usePartialUpdate True to use fast partial refresh, false for full refresh
- */
-void drawFace(bool happy, bool usePartialUpdate = false) {
-  // Set update window based on refresh type
-  if (usePartialUpdate) {
-    // Define partial window for faster updates (just the mouth area)
-    int mouthX = FACE_CENTER_X - FACE_RADIUS / 2;
-    int mouthY = FACE_CENTER_Y + FACE_RADIUS / 4;
-    int mouthWidth = FACE_RADIUS;
-    int mouthHeight = FACE_RADIUS / 2;
-    display.setPartialWindow(mouthX, mouthY, mouthWidth, mouthHeight);
+void setupWiFi() {
+  Serial.println("====================================");
+  Serial.println("WiFi Configuration");
+  Serial.println("====================================");
+
+  // 尝试连接到WiFi（STA模式）
+  Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  // 等待连接，最多30秒
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 60) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  Serial.println();
+
+  IPAddress IP;
+  String accessInfo;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    // STA模式连接成功
+    IP = WiFi.localIP();
+    Serial.println("WiFi Connected (STA Mode)!");
+    Serial.print("IP Address: ");
+    Serial.println(IP);
+    Serial.printf("mDNS: http://%s.local\n", MDNS_HOSTNAME);
+
+    // 启动mDNS
+    if (MDNS.begin(MDNS_HOSTNAME)) {
+      Serial.printf("mDNS responder started: %s.local\n", MDNS_HOSTNAME);
+      MDNS.addService("http", "tcp", WEB_SERVER_PORT);
+    } else {
+      Serial.println("Error starting mDNS");
+    }
+
+    accessInfo = String(MDNS_HOSTNAME) + ".local";
+    displayMessage("WiFi Connected", accessInfo);
+
   } else {
-    display.setFullWindow();
+    // STA模式失败，启动AP模式
+    Serial.println("WiFi connection failed!");
+    Serial.println("Starting AP mode as fallback...");
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+    IP = WiFi.softAPIP();
+    Serial.println("AP Mode Started");
+    Serial.printf("SSID: %s\n", AP_SSID);
+    Serial.printf("Password: %s\n", AP_PASSWORD);
+    Serial.print("AP IP: ");
+    Serial.println(IP);
+
+    accessInfo = IP.toString();
+    displayMessage("WiFi AP Mode", accessInfo);
   }
 
-  display.firstPage();
-  do {
-    if (!usePartialUpdate) {
-      display.fillScreen(GxEPD_WHITE);
-    }
-
-    // Draw title text with custom font (skip in partial update)
-    if (!usePartialUpdate) {
-      display.setFont(&FreeMonoBold12pt7b);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(8, 24);
-      display.print("你好 SSD1680");
-
-      // Draw face circle
-      display.drawCircle(FACE_CENTER_X, FACE_CENTER_Y, FACE_RADIUS, GxEPD_BLACK);
-
-      // Draw eyes
-      int eyeOffsetX = FACE_RADIUS / 2;
-      int eyeOffsetY = FACE_RADIUS / 3;
-      const int EYE_RADIUS = 5;
-
-      display.fillCircle(FACE_CENTER_X - eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
-      display.fillCircle(FACE_CENTER_X + eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
-    }
-
-    // Draw mouth (this will be updated in partial refresh mode)
-    if (happy) {
-      // Draw smile (parabola curve)
-      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 2) {
-        int y = FACE_CENTER_Y + FACE_RADIUS / 3 + (i * i) / (FACE_RADIUS / 2 + 1) / 3;
-        display.drawPixel(FACE_CENTER_X + i, y, GxEPD_BLACK);
-      }
-
-      // Display happy message (skip in partial update)
-      if (!usePartialUpdate) {
-        display.setFont(&FreeMonoBold9pt7b);
-        display.setCursor(8, EPD_HEIGHT - 8);
-        display.print("Have a nice day!");
-      }
-    }
-    else {
-      // Draw frown (inverted parabola)
-      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 2) {
-        int y = FACE_CENTER_Y + FACE_RADIUS / 2 - (i * i) / (FACE_RADIUS / 2 + 1) / 2;
-        display.drawPixel(FACE_CENTER_X + i, y, GxEPD_BLACK);
-      }
-
-      // Display encouraging message (skip in partial update)
-      if (!usePartialUpdate) {
-        display.setFont(&FreeMonoBold9pt7b);
-        display.setCursor(8, EPD_HEIGHT - 8);
-        display.print("Keep going!");
-      }
-    }
-  } while (display.nextPage());
-}
-
-/**
- * @brief Draw a hatch pattern on the display
- */
-void drawPattern() {
-  const int MARGIN = 8;
-  const int BOTTOM_TEXT_HEIGHT = 56;
-  const int LINE_SPACING = 6;
-
-  int x0 = MARGIN;
-  int y0 = 40;
-  int width = EPD_WIDTH - (MARGIN * 2);
-  int height = EPD_HEIGHT - BOTTOM_TEXT_HEIGHT;
-
-  // Draw horizontal lines
-  for (int y = y0; y < y0 + height; y += LINE_SPACING) {
-    display.drawLine(x0, y, x0 + width, y, GxEPD_BLACK);
-  }
-
-  // Draw vertical lines
-  for (int x = x0; x < x0 + width; x += LINE_SPACING) {
-    display.drawLine(x, y0, x, y0 + height, GxEPD_BLACK);
-  }
+  Serial.println("====================================");
 }
 
 // ============================================================================
-// Arduino Setup Function
+// Arduino Setup
 // ============================================================================
 
-/**
- * @brief Initialize the display and draw the first page
- */
 void setup() {
-  // Initialize serial communication
   Serial.begin(115200);
   delay(100);
-  Serial.println("GxEPD2 SSD1680 demo with partial refresh support");
-  Serial.println("=================================================");
 
-  // Initialize SPI with custom pins
+  Serial.println("====================================");
+  Serial.println("E-Ink Novel Reader Starting...");
+  Serial.println("====================================");
+
+  // 初始化SPI
   SPI.begin(HW_SCK, HW_MISO, HW_MOSI, PIN_CS);
 
-  // Initialize the display
-  // init(serial_diag_bitrate, init_busy_level, reset_duration, pulldown_rst)
+  // 初始化显示屏
   display.init(115200, true, 2, false);
-
-  // Set display rotation (1 or 3 often suits 250x122 panels in landscape)
   display.setRotation(1);
 
-  // Draw first page with FULL REFRESH: happy face with pattern
-  Serial.println("Drawing initial screen with FULL refresh...");
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-    drawFace(true, false);  // false = full refresh
-    drawPattern();
-  } while (display.nextPage());
+  // 初始化reader模块的显示
+  initDisplay(display);
 
-  // Put display to sleep to save power
-  display.hibernate();
+  // 显示启动画面
+  displayMessage("Starting", "Initializing...");
 
-  Serial.println("Initial screen drawn. Starting partial refresh demo...");
-  Serial.println("Full refresh will occur every 10 cycles to prevent ghosting.");
+  // 初始化LittleFS
+  if (!initLittleFS()) {
+    displayMessage("Error", "FS Init Failed");
+    while (1) { delay(1000); }
+  }
+
+  // 初始化WiFi
+  setupWiFi();
+
+  // 初始化API和Web服务器
+  setupAPI(server);
+
+  // 初始化按钮控制
+  setupButton();
+
+  // 初始化阅读状态
+  reading.isReading = false;
+  reading.currentPage = 0;
+  reading.totalPages = 0;
+
+  Serial.println("System ready!");
+  Serial.println("====================================");
+  Serial.println("Access Information:");
+
+  if (WiFi.getMode() == WIFI_STA) {
+    Serial.printf("Mode: WiFi Station (STA)\n");
+    Serial.printf("URL: http://%s.local\n", MDNS_HOSTNAME);
+    Serial.printf("IP: http://%s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.printf("Mode: WiFi Access Point (AP)\n");
+    Serial.printf("SSID: %s\n", AP_SSID);
+    Serial.printf("Password: %s\n", AP_PASSWORD);
+    Serial.printf("URL: http://192.168.4.1\n");
+  }
+
+  Serial.println("====================================");
 }
 
 // ============================================================================
-// Arduino Loop Function
+// Arduino Loop
 // ============================================================================
 
-/**
- * @brief Alternate between happy and sad faces
- * Uses PARTIAL refresh for fast updates, with periodic FULL refresh
- * to prevent ghosting artifacts
- */
 void loop() {
-  static bool isHappy = false;
-  static uint8_t updateCount = 0;
-  const unsigned long PARTIAL_UPDATE_INTERVAL_MS = 3000;  // 3 seconds for demo
-  const uint8_t FULL_REFRESH_EVERY_N_UPDATES = 10;        // Full refresh every 10 updates
+  // 处理按钮事件
+  handleButton();
 
-  delay(PARTIAL_UPDATE_INTERVAL_MS);
-
-  // Toggle face expression
-  isHappy = !isHappy;
-  updateCount++;
-
-  // Decide whether to use partial or full refresh
-  bool useFullRefresh = (updateCount >= FULL_REFRESH_EVERY_N_UPDATES);
-
-  if (useFullRefresh) {
-    // Periodic FULL REFRESH to clear ghosting
-    Serial.printf("Update #%d: FULL refresh (clearing ghosting)... ", updateCount);
-
-    display.setFullWindow();
-    display.firstPage();
-    do {
-      display.fillScreen(GxEPD_WHITE);
-      drawFace(isHappy, false);  // false = full refresh
-      drawPattern();
-    } while (display.nextPage());
-
-    updateCount = 0;  // Reset counter
-  } else {
-    // Fast PARTIAL REFRESH (only mouth area)
-    Serial.printf("Update #%d: PARTIAL refresh (fast)... ", updateCount);
-
-    drawFace(isHappy, true);  // true = partial refresh
-  }
-
-  // Put display to sleep to save power
-  display.hibernate();
-
-  Serial.printf("happy=%d\n", isHappy);
+  // Web服务器由AsyncWebServer异步处理
+  delay(10);  // 减小延迟以提高按钮响应速度
 }
