@@ -40,103 +40,106 @@ const int FACE_RADIUS = min(EPD_WIDTH, EPD_HEIGHT) / 2 - 10;
 // ============================================================================
 
 /**
- * @brief Draw a face on the display (happy or sad)
+ * @brief Draw a complete face on the display (full refresh)
  * @param happy True for happy face, false for sad face
- * @param usePartialUpdate True to use fast partial refresh, false for full refresh
  */
-void drawFace(bool happy, bool usePartialUpdate = false) {
-  // Set update window based on refresh type
-  if (usePartialUpdate) {
-    // Define partial window for faster updates (just the mouth area)
-    int mouthX = FACE_CENTER_X - FACE_RADIUS / 2;
-    int mouthY = FACE_CENTER_Y + FACE_RADIUS / 4;
-    int mouthWidth = FACE_RADIUS;
-    int mouthHeight = FACE_RADIUS / 2;
-    display.setPartialWindow(mouthX, mouthY, mouthWidth, mouthHeight);
-  } else {
-    display.setFullWindow();
-  }
-
+void drawFaceFull(bool happy) {
+  display.setFullWindow();
   display.firstPage();
   do {
-    if (!usePartialUpdate) {
-      display.fillScreen(GxEPD_WHITE);
-    }
+    display.fillScreen(GxEPD_WHITE);
 
-    // Draw title text with custom font (skip in partial update)
-    if (!usePartialUpdate) {
-      display.setFont(&FreeMonoBold12pt7b);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(8, 24);
-      display.print("你好 SSD1680");
+    // Draw title text
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setTextColor(GxEPD_BLACK);
+    display.setCursor(8, 24);
+    display.print("HELLO SSD1680");
 
-      // Draw face circle
-      display.drawCircle(FACE_CENTER_X, FACE_CENTER_Y, FACE_RADIUS, GxEPD_BLACK);
+    // Draw face circle
+    display.drawCircle(FACE_CENTER_X, FACE_CENTER_Y, FACE_RADIUS, GxEPD_BLACK);
 
-      // Draw eyes
-      int eyeOffsetX = FACE_RADIUS / 2;
-      int eyeOffsetY = FACE_RADIUS / 3;
-      const int EYE_RADIUS = 5;
+    // Draw eyes
+    int eyeOffsetX = FACE_RADIUS / 2;
+    int eyeOffsetY = FACE_RADIUS / 3;
+    const int EYE_RADIUS = 5;
 
-      display.fillCircle(FACE_CENTER_X - eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
-      display.fillCircle(FACE_CENTER_X + eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
-    }
+    display.fillCircle(FACE_CENTER_X - eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
+    display.fillCircle(FACE_CENTER_X + eyeOffsetX, FACE_CENTER_Y - eyeOffsetY, EYE_RADIUS, GxEPD_BLACK);
 
-    // Draw mouth (this will be updated in partial refresh mode)
+    // Draw mouth
     if (happy) {
       // Draw smile (parabola curve)
-      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 2) {
+      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 1) {
         int y = FACE_CENTER_Y + FACE_RADIUS / 3 + (i * i) / (FACE_RADIUS / 2 + 1) / 3;
-        display.drawPixel(FACE_CENTER_X + i, y, GxEPD_BLACK);
+        display.fillCircle(FACE_CENTER_X + i, y, 2, GxEPD_BLACK);
       }
-
-      // Display happy message (skip in partial update)
-      if (!usePartialUpdate) {
-        display.setFont(&FreeMonoBold9pt7b);
-        display.setCursor(8, EPD_HEIGHT - 8);
-        display.print("Have a nice day!");
-      }
+      display.setFont(&FreeMonoBold9pt7b);
+      display.setCursor(8, EPD_HEIGHT - 8);
+      display.print("Have a nice day!");
     }
     else {
       // Draw frown (inverted parabola)
-      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 2) {
+      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 1) {
         int y = FACE_CENTER_Y + FACE_RADIUS / 2 - (i * i) / (FACE_RADIUS / 2 + 1) / 2;
-        display.drawPixel(FACE_CENTER_X + i, y, GxEPD_BLACK);
+        display.fillCircle(FACE_CENTER_X + i, y, 2, GxEPD_BLACK);
       }
-
-      // Display encouraging message (skip in partial update)
-      if (!usePartialUpdate) {
-        display.setFont(&FreeMonoBold9pt7b);
-        display.setCursor(8, EPD_HEIGHT - 8);
-        display.print("Keep going!");
-      }
+      display.setFont(&FreeMonoBold9pt7b);
+      display.setCursor(8, EPD_HEIGHT - 8);
+      display.print("Keep going!");
     }
   } while (display.nextPage());
 }
 
 /**
- * @brief Draw a hatch pattern on the display
+ * @brief Draw just the mouth (partial refresh)
+ * @param happy True for happy mouth, false for sad mouth
  */
-void drawPattern() {
-  const int MARGIN = 8;
-  const int BOTTOM_TEXT_HEIGHT = 56;
-  const int LINE_SPACING = 6;
+void drawMouthPartial(bool happy) {
+  // Define partial window for the mouth area
+  // Must be aligned to 8 pixels for rotation 1 (y and h must be multiple of 8)
+  // Expand window to ensure we capture the full mouth area
+  int mouthX = FACE_CENTER_X - FACE_RADIUS / 2 - 10;
+  int mouthY = (FACE_CENTER_Y - FACE_RADIUS / 4 - 10) & ~0x07;  // Align to 8
+  int mouthWidth = FACE_RADIUS + 50;
+  int mouthHeight = ((FACE_RADIUS / 2 + 25) + 70) & ~0x07;  // Align to 8
 
-  int x0 = MARGIN;
-  int y0 = 40;
-  int width = EPD_WIDTH - (MARGIN * 2);
-  int height = EPD_HEIGHT - BOTTOM_TEXT_HEIGHT;
+  Serial.printf("Partial window: x=%d, y=%d, w=%d, h=%d\n", mouthX, mouthY, mouthWidth, mouthHeight);
 
-  // Draw horizontal lines
-  for (int y = y0; y < y0 + height; y += LINE_SPACING) {
-    display.drawLine(x0, y, x0 + width, y, GxEPD_BLACK);
-  }
+  display.setPartialWindow(mouthX, mouthY, mouthWidth, mouthHeight);
 
-  // Draw vertical lines
-  for (int x = x0; x < x0 + width; x += LINE_SPACING) {
-    display.drawLine(x, y0, x, y0 + height, GxEPD_BLACK);
-  }
+  display.firstPage();
+  do {
+    // Fill the partial window with white to clear old content
+    display.fillRect(mouthX, mouthY, mouthWidth, mouthHeight, GxEPD_WHITE);
+
+    // Redraw part of the face circle that intersects with partial window
+    display.drawCircle(FACE_CENTER_X, FACE_CENTER_Y, FACE_RADIUS, GxEPD_BLACK);
+
+    // Draw mouth with thicker lines for better visibility
+    if (happy) {
+      // Draw smile (parabola curve)
+      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 1) {
+        int y = FACE_CENTER_Y + FACE_RADIUS / 3 + (i * i) / (FACE_RADIUS / 2 + 1) / 3;
+        display.fillCircle(FACE_CENTER_X + i, y, 2, GxEPD_BLACK);
+        // Add one more pixel for thickness
+        display.fillCircle(FACE_CENTER_X + i, y + 1, 1, GxEPD_BLACK);
+      }
+    }
+    else {
+      // Draw frown (inverted parabola)
+      for (int i = -FACE_RADIUS / 2; i <= FACE_RADIUS / 2; i += 1) {
+        int y = FACE_CENTER_Y + FACE_RADIUS / 2 - (i * i) / (FACE_RADIUS / 2 + 1) / 2;
+        display.fillCircle(FACE_CENTER_X + i, y, 2, GxEPD_BLACK);
+        // Add one more pixel for thickness
+        display.fillCircle(FACE_CENTER_X + i, y + 1, 1, GxEPD_BLACK);
+      }
+    }
+        display.fillCircle(FACE_CENTER_X, FACE_CENTER_Y, FACE_RADIUS, GxEPD_BLACK);
+
+  } while (display.nextPage());
 }
+
+static bool isHappy = false;
 
 // ============================================================================
 // Arduino Setup Function
@@ -162,20 +165,15 @@ void setup() {
   // Set display rotation (1 or 3 often suits 250x122 panels in landscape)
   display.setRotation(1);
 
-  // Draw first page with FULL REFRESH: happy face with pattern
+  // Draw first page with FULL REFRESH: happy face
   Serial.println("Drawing initial screen with FULL refresh...");
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-    drawFace(true, false);  // false = full refresh
-    drawPattern();
-  } while (display.nextPage());
+  drawFaceFull(false);
 
   // Put display to sleep to save power
   display.hibernate();
 
   Serial.println("Initial screen drawn. Starting partial refresh demo...");
+  Serial.println("Partial refresh will update only the mouth area.");
   Serial.println("Full refresh will occur every 10 cycles to prevent ghosting.");
 }
 
@@ -189,10 +187,9 @@ void setup() {
  * to prevent ghosting artifacts
  */
 void loop() {
-  static bool isHappy = false;
   static uint8_t updateCount = 0;
-  const unsigned long PARTIAL_UPDATE_INTERVAL_MS = 3000;  // 3 seconds for demo
-  const uint8_t FULL_REFRESH_EVERY_N_UPDATES = 10;        // Full refresh every 10 updates
+  const unsigned long PARTIAL_UPDATE_INTERVAL_MS = 2000;
+  const uint8_t FULL_REFRESH_EVERY_N_UPDATES = 5;        // Full refresh every 5 updates (manufacturer recommendation)
 
   delay(PARTIAL_UPDATE_INTERVAL_MS);
 
@@ -206,21 +203,12 @@ void loop() {
   if (useFullRefresh) {
     // Periodic FULL REFRESH to clear ghosting
     Serial.printf("Update #%d: FULL refresh (clearing ghosting)... ", updateCount);
-
-    display.setFullWindow();
-    display.firstPage();
-    do {
-      display.fillScreen(GxEPD_WHITE);
-      drawFace(isHappy, false);  // false = full refresh
-      drawPattern();
-    } while (display.nextPage());
-
+    drawFaceFull(isHappy);
     updateCount = 0;  // Reset counter
   } else {
     // Fast PARTIAL REFRESH (only mouth area)
     Serial.printf("Update #%d: PARTIAL refresh (fast)... ", updateCount);
-
-    drawFace(isHappy, true);  // true = partial refresh
+    drawMouthPartial(isHappy);
   }
 
   // Put display to sleep to save power
