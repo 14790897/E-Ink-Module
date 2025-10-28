@@ -199,3 +199,6 @@ MIT License
 ## 作者
 
 Created with ❤️ for E-Ink reading enthusiasts
+
+
+C:\Program Files\VirtViewer v11.0-256\bin>remote-viewer --full-screen C:\Users\13963\Downloads\pve-spice.vv

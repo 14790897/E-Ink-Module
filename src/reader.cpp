@@ -15,15 +15,15 @@ const int SCREEN_HEIGHT = EPD_WIDTH;   // 旋转后的实际高度 = 250
 const int CHINESE_CHAR_WIDTH = 12;     // 中文字符宽度（像素）- u8g2_font_wqy12_t_gb2312
 const int ASCII_CHAR_WIDTH = 6;        // ASCII字符宽度（像素）
 const int LINE_HEIGHT = 13;            // 行高（像素）
-const int MARGIN_LEFT = 2;             // 左边距
-const int MARGIN_TOP = 2;              // 上边距
-const int MARGIN_RIGHT = 2;            // 右边距
-const int MARGIN_BOTTOM = 14;          // 下边距（留给页码）
+const int MARGIN_LEFT = 4;             // 左边距（增加以避免边缘裁切）
+const int MARGIN_TOP = 13;             // 上边距（为字体顶部留出空间）
+const int MARGIN_RIGHT = 6;            // 右边距（增加以避免右侧文字被裁切）
+const int MARGIN_BOTTOM = 10;          // 下边距（留给页码，减少空白）
 
-const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
-const int CHARS_PER_LINE = DISPLAY_WIDTH / CHINESE_CHAR_WIDTH;  // 按中文字符计算
-const int LINES_PER_PAGE = DISPLAY_HEIGHT / LINE_HEIGHT;
+const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;  // 122-4-6=112像素
+const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM; // 250-13-10=227像素
+const int CHARS_PER_LINE = DISPLAY_WIDTH / CHINESE_CHAR_WIDTH;  // 112/12=9个中文字符
+const int LINES_PER_PAGE = DISPLAY_HEIGHT / LINE_HEIGHT;  // 227/13=17行
 const int CHARS_PER_PAGE = CHARS_PER_LINE * LINES_PER_PAGE;
 
 // ============================================================================
@@ -80,8 +80,10 @@ void initDisplay(GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT>& display) {
   Serial.println("Display initialized with Chinese font support");
 }
 
-void displayText(const String& text, int pageNum, int totalPages) {
-  if (!displayPtr) return;
+int displayText(const String& text, int pageNum, int totalPages) {
+  if (!displayPtr) return 0;
+
+  int totalCharsDisplayed = 0;  // 记录实际显示的字符数
 
   displayPtr->setFullWindow();
   displayPtr->firstPage();
@@ -99,7 +101,7 @@ void displayText(const String& text, int pageNum, int totalPages) {
 
     // 显示文本内容
     int x = MARGIN_LEFT;
-    int y = MARGIN_TOP + 11; // U8g2字体的基线位置
+    int y = MARGIN_TOP; // U8g2字体的基线位置（从上边距开始）
 
     int charIndex = 0;
     int lineCount = 0;
@@ -147,16 +149,23 @@ void displayText(const String& text, int pageNum, int totalPages) {
       lineCount++;
     }
 
-    // 显示页码（使用小字体）
+    // 记录实际显示的字符数（在第一次循环时记录）
+    if (totalCharsDisplayed == 0) {
+      totalCharsDisplayed = charIndex;
+    }
+
+    // 显示页码（使用小字体，紧贴底部）
     u8g2.setFont(u8g2_font_6x10_tf);
     String pageInfo = String(pageNum + 1) + " / " + String(totalPages);
     int pageInfoWidth = pageInfo.length() * 6;
-    u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - 4);
+    u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - 2); // 改为-2，更接近底部
     u8g2.print(pageInfo);
 
   } while (displayPtr->nextPage());
 
   displayPtr->hibernate();
+
+  return totalCharsDisplayed;  // 返回实际显示的字符数
 }
 
 void displayMessage(const String& title, const String& message) {
@@ -194,10 +203,8 @@ void displayMessage(const String& title, const String& message) {
 // Reading Functions
 // ============================================================================
 
-String readPageContent(File& file, int pageNum) {
-  // 计算起始位置
-  long startPos = pageNum * CHARS_PER_PAGE;
-
+String readPageContent(File& file, long startPos) {
+  // 从指定位置开始读取
   if (!file.seek(startPos)) {
     return "";
   }
@@ -205,7 +212,8 @@ String readPageContent(File& file, int pageNum) {
   String content = "";
   int charsRead = 0;
 
-  while (file.available() && charsRead < CHARS_PER_PAGE) {
+  // 读取足够的内容供一页显示（预留更多空间）
+  while (file.available() && charsRead < CHARS_PER_PAGE * 2) {  // 读取两页的内容以防万一
     char c = file.read();
     content += c;
     charsRead++;
@@ -234,14 +242,19 @@ bool openBook(const String& bookName) {
 
   reading.currentBook = bookName;
   reading.currentPage = 0;
-  reading.totalPages = (reading.bookFile.size() / CHARS_PER_PAGE) + 1;
+  reading.currentFilePosition = 0;  // 从文件开始位置
+  reading.pageHistoryCount = 0;     // 清空历史记录
+  reading.pagePositions[0] = 0;     // 第一页从0开始
+  reading.pageHistoryCount = 1;
+  reading.totalPages = (reading.bookFile.size() / CHARS_PER_PAGE) + 1;  // 粗略估算
   reading.isReading = true;
 
-  Serial.printf("Opened book: %s (Pages: %d)\n", bookName.c_str(), reading.totalPages);
+  Serial.printf("Opened book: %s (Estimated pages: %d)\n", bookName.c_str(), reading.totalPages);
 
   // 显示第一页
-  String content = readPageContent(reading.bookFile, reading.currentPage);
-  displayText(content, reading.currentPage, reading.totalPages);
+  String content = readPageContent(reading.bookFile, reading.currentFilePosition);
+  int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
+  reading.currentFilePosition += charsDisplayed;  // 更新文件位置
 
   return true;
 }
@@ -251,12 +264,27 @@ void nextPage() {
     return;
   }
 
-  if (reading.currentPage < reading.totalPages - 1) {
-    reading.currentPage++;
-    String content = readPageContent(reading.bookFile, reading.currentPage);
-    displayText(content, reading.currentPage, reading.totalPages);
-    Serial.printf("Page: %d / %d\n", reading.currentPage + 1, reading.totalPages);
+  // 检查是否还有内容
+  if (reading.currentFilePosition >= reading.bookFile.size()) {
+    Serial.println("Already at the last page");
+    return;
   }
+
+  reading.currentPage++;
+  
+  // 保存当前页的起始位置到历史记录
+  if (reading.pageHistoryCount < MAX_PAGE_HISTORY) {
+    reading.pagePositions[reading.pageHistoryCount] = reading.currentFilePosition;
+    reading.pageHistoryCount++;
+  }
+  
+  // 从当前文件位置读取内容
+  String content = readPageContent(reading.bookFile, reading.currentFilePosition);
+  int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
+  reading.currentFilePosition += charsDisplayed;  // 更新文件位置
+  
+  Serial.printf("Page: %d, File position: %ld / %ld\n", 
+                reading.currentPage + 1, reading.currentFilePosition, reading.bookFile.size());
 }
 
 void prevPage() {
@@ -264,10 +292,26 @@ void prevPage() {
     return;
   }
 
-  if (reading.currentPage > 0) {
-    reading.currentPage--;
-    String content = readPageContent(reading.bookFile, reading.currentPage);
-    displayText(content, reading.currentPage, reading.totalPages);
-    Serial.printf("Page: %d / %d\n", reading.currentPage + 1, reading.totalPages);
+  if (reading.currentPage == 0) {
+    Serial.println("Already at the first page");
+    return;
+  }
+
+  reading.currentPage--;
+  
+  // 从历史记录中获取上一页的文件位置
+  if (reading.currentPage < reading.pageHistoryCount) {
+    long prevPosition = reading.pagePositions[reading.currentPage];
+    reading.currentFilePosition = prevPosition;
+    
+    // 读取并显示上一页
+    String content = readPageContent(reading.bookFile, reading.currentFilePosition);
+    int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
+    
+    // 更新文件位置到这一页的结束位置
+    reading.currentFilePosition = prevPosition + charsDisplayed;
+    
+    Serial.printf("Page: %d, File position: %ld / %ld\n", 
+                  reading.currentPage + 1, reading.currentFilePosition, reading.bookFile.size());
   }
 }

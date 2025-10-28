@@ -30,12 +30,17 @@ extern const int CHARS_PER_PAGE;
 // ============================================================================
 // Reading State
 // ============================================================================
+#define MAX_PAGE_HISTORY 100
+
 struct ReadingState {
   String currentBook;
   int currentPage;
   int totalPages;
   File bookFile;
   bool isReading;
+  long currentFilePosition;  // 当前页在文件中的起始位置
+  long pagePositions[MAX_PAGE_HISTORY];  // 页面位置历史记录
+  int pageHistoryCount;  // 历史记录数量
 };
 
 extern ReadingState reading;
@@ -44,7 +49,7 @@ extern ReadingState reading;
 // Display Functions
 // ============================================================================
 void initDisplay(GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT>& display);
-void displayText(const String& text, int pageNum, int totalPages);
+int displayText(const String& text, int pageNum, int totalPages);  // 返回实际显示的字符数
 void displayMessage(const String& title, const String& message);
 
 // ============================================================================
