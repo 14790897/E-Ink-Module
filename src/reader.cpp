@@ -1,16 +1,16 @@
-#include "reader.h"
+﻿#include "reader.h"
 
-// 屏幕使用 setRotation(1) 旋转了90度，物理尺寸：112*212，旋转后实际显示尺寸：212x112
 const int SCREEN_WIDTH = EPD_HEIGHT; // 旋转后的实际宽度 = 212
 const int SCREEN_HEIGHT = EPD_WIDTH; // 旋转后的实际高度 = 112
 
 const int CHINESE_CHAR_WIDTH = 12;
 const int LINE_HEIGHT = 13;
-const int MARGIN_LEFT = 2;
-const int MARGIN_TOP = 2;
+const int MARGIN_LEFT = 5;
+const int MARGIN_TOP = 20;
 const int MARGIN_RIGHT = 10;
 const int MARGIN_BOTTOM = 10;
 const int PAGE_NUM_HEIGHT = 4;
+const int WRAP_MARGIN = 2;  // 换行时的安全余量
 
 const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
 const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
@@ -76,8 +76,7 @@ static int calcPageBytes(const String& text) {
   int fontAscent = u8g2.getFontAscent();
   int fontDescent = u8g2.getFontDescent();
   int lineAdvance = fontAscent - fontDescent;
-  int y = MARGIN_TOP + fontAscent + 1;
-
+  int y = MARGIN_TOP + fontAscent + 3;
   int renderIndex = 0;
   while (renderIndex < text.length()) {
     String line = "";
@@ -93,7 +92,7 @@ static int calcPageBytes(const String& text) {
       int charLen = getUTF8CharLength(text.c_str(), renderIndex);
       String currentChar = text.substring(renderIndex, renderIndex + charLen);
       int charPixelWidth = u8g2.getUTF8Width(currentChar.c_str());
-      if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) break;
+      if (linePixelWidth + charPixelWidth + WRAP_MARGIN > DISPLAY_WIDTH) break;
       line += currentChar;
       linePixelWidth += charPixelWidth;
       renderIndex += charLen;
@@ -117,6 +116,7 @@ int displayText(const String& text, int pageNum, int totalPages) {
   displayPtr->firstPage();
 
   int pageCharCount = 0;
+  int lineCount = 0;
   do {
     displayPtr->fillScreen(GxEPD_WHITE);
     displayPtr->setTextColor(GxEPD_BLACK);
@@ -131,9 +131,16 @@ int displayText(const String& text, int pageNum, int totalPages) {
     int fontDescent = u8g2.getFontDescent();
     int lineAdvance = fontAscent - fontDescent;
 
+    Serial.printf("  Font metrics: ascent=%d, descent=%d, lineAdvance=%d\n",
+                  fontAscent, fontDescent, lineAdvance);
+
     int x = MARGIN_LEFT;
-    int y = MARGIN_TOP + fontAscent + 1;
+    int y = MARGIN_TOP + fontAscent + 3;  // 增加3，给顶部更多空间
     int renderIndex = 0;
+    lineCount = 0;
+
+    Serial.printf("  Initial y=%d, limit=%d\n", y, SCREEN_HEIGHT - PAGE_NUM_HEIGHT);
+    Serial.printf("  Text preview (first 50 chars): %.50s\n", text.c_str());
 
     while (renderIndex < text.length()) {
       String line = "";
@@ -152,7 +159,7 @@ int displayText(const String& text, int pageNum, int totalPages) {
         String currentChar = text.substring(renderIndex, renderIndex + charLen);
         int charPixelWidth = u8g2.getUTF8Width(currentChar.c_str());
 
-        if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) break;
+        if (linePixelWidth + charPixelWidth + WRAP_MARGIN > DISPLAY_WIDTH) break;
 
         line += currentChar;
         linePixelWidth += charPixelWidth;
@@ -164,9 +171,18 @@ int displayText(const String& text, int pageNum, int totalPages) {
         u8g2.print(line);
       }
 
+      if (lineCount == 0) {
+        Serial.printf("  First line (y=%d): '%s' (len=%d)\n", y, line.c_str(), line.length());
+      }
+
+      lineCount++;
       y += lineAdvance;
 
-      if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) break;
+      if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) {
+        Serial.printf("  Line %d: y=%d, fontDescent=%d, limit=%d, stopped\n",
+                     lineCount, y, fontDescent, SCREEN_HEIGHT - PAGE_NUM_HEIGHT);
+        break;
+      }
     }
 
     pageCharCount = renderIndex;
@@ -181,7 +197,7 @@ int displayText(const String& text, int pageNum, int totalPages) {
 
   displayPtr->hibernate();
 
-  Serial.printf("Displayed %d bytes\n", pageCharCount);
+  Serial.printf("Page %d: Displayed %d bytes, %d lines\n", pageNum + 1, pageCharCount, lineCount);
   return pageCharCount;
 }
 
@@ -324,3 +340,4 @@ void prevPage() {
                   reading.currentFilePosition, reading.bookFile.size());
   }
 }
+
