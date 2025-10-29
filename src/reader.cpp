@@ -5,9 +5,9 @@ const int SCREEN_HEIGHT = EPD_WIDTH; // 旋转后的实际高度 = 112
 
 const int CHINESE_CHAR_WIDTH = 12;
 const int LINE_HEIGHT = 13;
-const int MARGIN_LEFT = 5;
+const int MARGIN_LEFT = 0;
 const int MARGIN_TOP = 20;
-const int MARGIN_RIGHT = 10;
+const int MARGIN_RIGHT = 20;
 const int MARGIN_BOTTOM = 10;
 const int PAGE_NUM_HEIGHT = 4;
 const int WRAP_MARGIN = 2;  // 换行时的安全余量
