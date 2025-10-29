@@ -442,6 +442,118 @@
         ::-webkit-scrollbar-thumb:hover {
             background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
         }
+
+        /* 提示框样式 */
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            min-width: 300px;
+            max-width: 500px;
+            text-align: center;
+            opacity: 0;
+            animation: toastFadeIn 0.3s ease forwards;
+        }
+
+        @keyframes toastFadeIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        .toast.fade-out {
+            animation: toastFadeOut 0.3s ease forwards;
+        }
+
+        @keyframes toastFadeOut {
+            from {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            to {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+        }
+
+        .toast-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            opacity: 0;
+            animation: overlayFadeIn 0.3s ease forwards;
+        }
+
+        @keyframes overlayFadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .toast-overlay.fade-out {
+            animation: overlayFadeOut 0.3s ease forwards;
+        }
+
+        @keyframes overlayFadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+
+        .toast-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .toast-message {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .toast-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .toast.success .toast-icon {
+            color: #28a745;
+        }
+
+        .toast.error .toast-icon {
+            color: #dc3545;
+        }
+
+        .toast.info .toast-icon {
+            color: #667eea;
+        }
+
+        .toast.warning .toast-icon {
+            color: #ffc107;
+        }
     </style>
 </head>
 <body>
@@ -505,6 +617,9 @@
             </div>
         </div>
     </div>
+
+    <!-- 提示框容器 -->
+    <div id="toastContainer"></div>
 
     <script src="app.js"></script>
 </body>

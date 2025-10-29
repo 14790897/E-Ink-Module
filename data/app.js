@@ -4,6 +4,110 @@
 const API_BASE = '';
 
 // ============================================================================
+// 提示框函数
+// ============================================================================
+function showToast(message, type = 'info', duration = 2000) {
+    const container = document.getElementById('toastContainer');
+
+    // 创建遮罩层
+    const overlay = document.createElement('div');
+    overlay.className = 'toast-overlay';
+
+    // 创建提示框
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+
+    // 图标映射
+    const icons = {
+        success: '✓',
+        error: '✕',
+        info: 'ℹ',
+        warning: '⚠'
+    };
+
+    toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || icons.info}</div>
+        <div class="toast-message">${message}</div>
+        <div class="toast-buttons">
+            <button class="btn btn-primary" onclick="closeToast(this)">确定</button>
+        </div>
+    `;
+
+    container.appendChild(overlay);
+    container.appendChild(toast);
+
+    // 点击遮罩层关闭
+    overlay.onclick = () => closeToast(toast);
+
+    // 自动关闭（如果设置了持续时间）
+    if (duration > 0 && type !== 'error') {
+        setTimeout(() => closeToast(toast), duration);
+    }
+}
+
+function showConfirm(message, onConfirm, onCancel) {
+    const container = document.getElementById('toastContainer');
+
+    // 创建遮罩层
+    const overlay = document.createElement('div');
+    overlay.className = 'toast-overlay';
+
+    // 创建提示框
+    const toast = document.createElement('div');
+    toast.className = 'toast warning';
+
+    toast.innerHTML = `
+        <div class="toast-icon">⚠</div>
+        <div class="toast-message">${message}</div>
+        <div class="toast-buttons">
+            <button class="btn btn-secondary" id="cancelBtn">取消</button>
+            <button class="btn btn-danger" id="confirmBtn">确定</button>
+        </div>
+    `;
+
+    container.appendChild(overlay);
+    container.appendChild(toast);
+
+    // 绑定按钮事件
+    const confirmBtn = toast.querySelector('#confirmBtn');
+    const cancelBtn = toast.querySelector('#cancelBtn');
+
+    confirmBtn.onclick = () => {
+        closeToast(toast);
+        if (onConfirm) onConfirm();
+    };
+
+    cancelBtn.onclick = () => {
+        closeToast(toast);
+        if (onCancel) onCancel();
+    };
+
+    // 点击遮罩层取消
+    overlay.onclick = () => {
+        closeToast(toast);
+        if (onCancel) onCancel();
+    };
+}
+
+function closeToast(element) {
+    const toast = element.classList?.contains('toast') ? element : element.closest('.toast');
+    if (!toast) return;
+
+    const overlay = toast.previousElementSibling;
+
+    // 添加淡出动画
+    toast.classList.add('fade-out');
+    if (overlay) overlay.classList.add('fade-out');
+
+    // 动画结束后移除元素
+    setTimeout(() => {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 300);
+}
+
+
+// ============================================================================
 // 页面加载时初始化
 // ============================================================================
 document.addEventListener('DOMContentLoaded', function() {
@@ -79,19 +183,19 @@ async function uploadBook() {
     const file = fileInput.files[0];
 
     if (!file) {
-        alert('请先选择文件');
+        showToast('请先选择文件', 'warning', 3000);
         return;
     }
 
     // 检查文件类型
     if (!file.name.endsWith('.txt')) {
-        alert('只支持TXT格式文件');
+        showToast('只支持TXT格式文件', 'error', 3000);
         return;
     }
 
     // 检查文件大小（限制为2MB）
     if (file.size > 2 * 1024 * 1024) {
-        alert('文件大小不能超过2MB');
+        showToast('文件大小不能超过2MB', 'error', 3000);
         return;
     }
 
@@ -109,17 +213,17 @@ async function uploadBook() {
         const result = await response.json();
 
         if (result.success) {
-            alert('上传成功！');
+            showToast('上传成功！', 'success', 2000);
             fileInput.value = '';
             document.getElementById('fileName').textContent = '未选择文件';
             loadBookList();
             loadStatus();
         } else {
-            alert('上传失败：' + (result.message || '未知错误'));
+            showToast('上传失败：' + (result.message || '未知错误'), 'error', 3000);
         }
     } catch (error) {
         console.error('上传失败:', error);
-        alert('上传失败：' + error.message);
+        showToast('上传失败：' + error.message, 'error', 3000);
     } finally {
         showLoading(false);
     }
@@ -143,14 +247,14 @@ async function readBook(bookName) {
         const result = await response.json();
 
         if (result.success) {
-            alert(`开始阅读《${bookName}》`);
+            showToast(`开始阅读《${bookName}》`, 'success', 2000);
             loadStatus();
         } else {
-            alert('打开失败：' + (result.message || '未知错误'));
+            showToast('打开失败：' + (result.message || '未知错误'), 'error', 3000);
         }
     } catch (error) {
         console.error('打开书籍失败:', error);
-        alert('打开失败：' + error.message);
+        showToast('打开失败：' + error.message, 'error', 3000);
     } finally {
         showLoading(false);
     }
@@ -160,36 +264,34 @@ async function readBook(bookName) {
 // 删除书籍
 // ============================================================================
 async function deleteBook(bookName) {
-    if (!confirm(`确定要删除《${bookName}》吗？`)) {
-        return;
-    }
+    showConfirm(`确定要删除《${bookName}》吗？`, async () => {
+        showLoading(true);
 
-    showLoading(true);
+        try {
+            const response = await fetch(API_BASE + '/api/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ book: bookName })
+            });
 
-    try {
-        const response = await fetch(API_BASE + '/api/delete', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ book: bookName })
-        });
+            const result = await response.json();
 
-        const result = await response.json();
-
-        if (result.success) {
-            alert('删除成功！');
-            loadBookList();
-            loadStatus();
-        } else {
-            alert('删除失败：' + (result.message || '未知错误'));
+            if (result.success) {
+                showToast('删除成功！', 'success', 2000);
+                loadBookList();
+                loadStatus();
+            } else {
+                showToast('删除失败：' + (result.message || '未知错误'), 'error', 3000);
+            }
+        } catch (error) {
+            console.error('删除书籍失败:', error);
+            showToast('删除失败：' + error.message, 'error', 3000);
+        } finally {
+            showLoading(false);
         }
-    } catch (error) {
-        console.error('删除书籍失败:', error);
-        alert('删除失败：' + error.message);
-    } finally {
-        showLoading(false);
-    }
+    });
 }
 
 // ============================================================================
@@ -208,11 +310,11 @@ async function nextPage() {
         if (result.success) {
             loadStatus();
         } else {
-            alert('翻页失败：' + (result.message || '未知错误'));
+            showToast('翻页失败：' + (result.message || '未知错误'), 'error', 3000);
         }
     } catch (error) {
         console.error('翻页失败:', error);
-        alert('翻页失败：' + error.message);
+        showToast('翻页失败：' + error.message, 'error', 3000);
     } finally {
         showLoading(false);
     }
@@ -231,11 +333,11 @@ async function prevPage() {
         if (result.success) {
             loadStatus();
         } else {
-            alert('翻页失败：' + (result.message || '未知错误'));
+            showToast('翻页失败：' + (result.message || '未知错误'), 'error', 3000);
         }
     } catch (error) {
         console.error('翻页失败:', error);
-        alert('翻页失败：' + error.message);
+        showToast('翻页失败：' + error.message, 'error', 3000);
     } finally {
         showLoading(false);
     }

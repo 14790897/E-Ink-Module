@@ -1,178 +1,179 @@
-// ============================================================================
-// Reader Management Implementation
-// ============================================================================
-
 #include "reader.h"
 
-// ============================================================================
-// Text Display Configuration
-// ============================================================================
-// 注意：屏幕使用 setRotation(1) 旋转了90度
-// 物理尺寸：112*212，旋转后实际显示尺寸：212x112
+// 屏幕使用 setRotation(1) 旋转了90度，物理尺寸：112*212，旋转后实际显示尺寸：212x112
 const int SCREEN_WIDTH = EPD_HEIGHT; // 旋转后的实际宽度 = 212
 const int SCREEN_HEIGHT = EPD_WIDTH; // 旋转后的实际高度 = 112
 
-const int CHINESE_CHAR_WIDTH = 12; // 中文字符宽度（像素）- u8g2_font_wqy12_t_gb2312
-const int ASCII_CHAR_WIDTH = 6;    // ASCII字符宽度（像素）
-const int LINE_HEIGHT = 13;        // 行高（像素）
-const int MARGIN_LEFT = 2;         // 左边距
-const int MARGIN_TOP = 2;          // 上边距（U8g2会自动从基线向上绘制字体）
-const int MARGIN_RIGHT = 2;        // 右边距（增加以避免右侧文字被裁切）
-const int MARGIN_BOTTOM = 10;      // 下边距（留给页码）
-const int PAGE_NUM_HEIGHT = 10;    // 页码区域高度
+const int CHINESE_CHAR_WIDTH = 12;
+const int LINE_HEIGHT = 13;
+const int MARGIN_LEFT = 2;
+const int MARGIN_TOP = 2;
+const int MARGIN_RIGHT = 10;
+const int MARGIN_BOTTOM = 10;
+const int PAGE_NUM_HEIGHT = 4;
 
-const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;   // 212-4-8=200像素
-const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM; // 112-10-10=92像素
-const int CHARS_PER_LINE = DISPLAY_WIDTH / CHINESE_CHAR_WIDTH;         // 200/12=16个中文字符
-const int LINES_PER_PAGE = DISPLAY_HEIGHT / LINE_HEIGHT;               // 92/13=7行
+const int DISPLAY_WIDTH = SCREEN_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
+const int DISPLAY_HEIGHT = SCREEN_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+const int CHARS_PER_LINE = DISPLAY_WIDTH / CHINESE_CHAR_WIDTH;
+const int LINES_PER_PAGE = DISPLAY_HEIGHT / LINE_HEIGHT;
 const int CHARS_PER_PAGE = CHARS_PER_LINE * LINES_PER_PAGE;
 
-// ============================================================================
-// Reading State
-// ============================================================================
 ReadingState reading;
 
-// ============================================================================
-// Global Display Objects
-// ============================================================================
 static GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT>* displayPtr = nullptr;
 static U8G2_FOR_ADAFRUIT_GFX u8g2;
 
-// ============================================================================
-// UTF-8 Helper Functions
-// ============================================================================
-
-// 获取UTF-8字符的字节长度
+// UTF-8 字符字节长度
 int getUTF8CharLength(const char* str, int index) {
   unsigned char c = str[index];
-  if (c < 0x80)
-    return 1; // ASCII
-  if ((c & 0xE0) == 0xC0)
-    return 2; // 2字节字符
-  if ((c & 0xF0) == 0xE0)
-    return 3; // 3字节字符（中文主要是这个）
-  if ((c & 0xF8) == 0xF0)
-    return 4; // 4字节字符
-  return 1;   // 默认
+  if (c < 0x80) return 1;
+  if ((c & 0xE0) == 0xC0) return 2;
+  if ((c & 0xF0) == 0xE0) return 3;
+  if ((c & 0xF8) == 0xF0) return 4;
+  return 1;
 }
 
-// 计算字符串的显示宽度（中文字符按12像素计算，ASCII按6像素计算）
-int getStringDisplayWidth(const String& str) {
-  int width = 0;
-  int i = 0;
-  while (i < str.length()) {
-    int charLen = getUTF8CharLength(str.c_str(), i);
-    if (charLen > 1) {
-      width += CHINESE_CHAR_WIDTH; // 中文字符宽度
-    } else {
-      width += ASCII_CHAR_WIDTH; // ASCII字符宽度
+// 使字符串在UTF-8边界结束
+static void trimToUTF8Boundary(String& s) {
+  while (s.length() > 0) {
+    uint8_t b = (uint8_t)s[s.length() - 1];
+    if ((b & 0xC0) == 0x80) {
+      s.remove(s.length() - 1);
+      continue;
     }
-    i += charLen;
+    int need = 1;
+    if ((b & 0xE0) == 0xC0) need = 2;
+    else if ((b & 0xF0) == 0xE0) need = 3;
+    else if ((b & 0xF8) == 0xF0) need = 4;
+    if (need > 1 && s.length() < need) {
+      s.remove(s.length() - 1);
+      continue;
+    }
+    break;
   }
-  return width;
 }
 
-// ============================================================================
-// Display Functions
-// ============================================================================
+static String readChunk(File& file, long startPos, int maxBytes) {
+  if (!file.seek(startPos)) return "";
+  String content = "";
+  int bytesRead = 0;
+  while (file.available() && bytesRead < maxBytes) {
+    content += (char)file.read();
+    bytesRead++;
+  }
+  trimToUTF8Boundary(content);
+  return content;
+}
+
+// 计算一页可容纳的字节数
+static int calcPageBytes(const String& text) {
+  u8g2.setFontMode(1);
+  u8g2.setFontDirection(0);
+  u8g2.setForegroundColor(GxEPD_BLACK);
+  u8g2.setBackgroundColor(GxEPD_WHITE);
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+
+  int fontAscent = u8g2.getFontAscent();
+  int fontDescent = u8g2.getFontDescent();
+  int lineAdvance = fontAscent - fontDescent;
+  int y = MARGIN_TOP + fontAscent + 1;
+
+  int renderIndex = 0;
+  while (renderIndex < text.length()) {
+    String line = "";
+    int linePixelWidth = 0;
+    while (renderIndex < text.length()) {
+      if (text[renderIndex] == '\n' || text[renderIndex] == '\r') {
+        renderIndex++;
+        if (text[renderIndex - 1] == '\r' && renderIndex < text.length() && text[renderIndex] == '\n') {
+          renderIndex++;
+        }
+        break;
+      }
+      int charLen = getUTF8CharLength(text.c_str(), renderIndex);
+      String currentChar = text.substring(renderIndex, renderIndex + charLen);
+      int charPixelWidth = u8g2.getUTF8Width(currentChar.c_str());
+      if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) break;
+      line += currentChar;
+      linePixelWidth += charPixelWidth;
+      renderIndex += charLen;
+    }
+    y += lineAdvance;
+    if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) break;
+  }
+  return renderIndex;
+}
 
 void initDisplay(GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT>& display) {
   displayPtr = &display;
-
-  // 初始化U8g2字体
   u8g2.begin(*displayPtr);
-
   Serial.println("Display initialized with Chinese font support");
 }
 
 int displayText(const String& text, int pageNum, int totalPages) {
-  if (!displayPtr)
-    return 0;
-
-  int totalCharsDisplayed = 0; // 记录实际显示的字节数
+  if (!displayPtr) return 0;
 
   displayPtr->setFullWindow();
   displayPtr->firstPage();
 
-  int charIndex = 0;
-  int lineCount = 0;
-  String displayedText = "";
+  int pageCharCount = 0;
   do {
     displayPtr->fillScreen(GxEPD_WHITE);
     displayPtr->setTextColor(GxEPD_BLACK);
 
-    // 使用U8g2中文字体 - 12号字体
-    u8g2.setFontMode(1);      // 透明模式
-    u8g2.setFontDirection(0); // 从左到右
+    u8g2.setFontMode(1);
+    u8g2.setFontDirection(0);
     u8g2.setForegroundColor(GxEPD_BLACK);
     u8g2.setBackgroundColor(GxEPD_WHITE);
-    u8g2.setFont(u8g2_font_wqy12_t_gb2312); // WenQuanYi 12px 中文字体
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
 
-    // 计算字体指标与分页：使用真实的行进高度以充分利用屏幕
-    int fontAscent = u8g2.getFontAscent();     // 通常为正值
-    int fontDescent = u8g2.getFontDescent();   // 通常为负值
-    int lineAdvance = fontAscent - fontDescent; // 实际行高（基线到下一行基线）
-    int availableHeight = SCREEN_HEIGHT - MARGIN_TOP - PAGE_NUM_HEIGHT; // 预留页码区域
-    int linesPerPage = availableHeight / lineAdvance;
+    int fontAscent = u8g2.getFontAscent();
+    int fontDescent = u8g2.getFontDescent();
+    int lineAdvance = fontAscent - fontDescent;
 
-    // 显示文本内容
     int x = MARGIN_LEFT;
-    // 基线 = 顶边 + ascent，使首行完整可见
-    int y = MARGIN_TOP + fontAscent + 1; // 微调1px，避免面板顶部可能的裁切
+    int y = MARGIN_TOP + fontAscent + 1;
+    int renderIndex = 0;
 
-
-    while (charIndex < text.length()) {
-      // 超出可用显示区域则停止（确保最后一行完整显示）
-      if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) {
-        break;
-      }
+    while (renderIndex < text.length()) {
       String line = "";
-      int linePixelWidth = 0; // 使用像素宽度而不是字符单位
+      int linePixelWidth = 0;
 
-      // 逐字符构建一行
-      while (charIndex < text.length() && linePixelWidth < DISPLAY_WIDTH) {
-        // 检查换行符
-        if (text[charIndex] == '\n' || text[charIndex] == '\r') {
-          charIndex++;
-          if (text[charIndex - 1] == '\r' && charIndex < text.length() && text[charIndex] == '\n') {
-            charIndex++; // 跳过 \r\n 中的 \n
+      while (renderIndex < text.length()) {
+        if (text[renderIndex] == '\n' || text[renderIndex] == '\r') {
+          renderIndex++;
+          if (text[renderIndex - 1] == '\r' && renderIndex < text.length() && text[renderIndex] == '\n') {
+            renderIndex++;
           }
           break;
         }
 
-        // 获取当前字符长度
-        int charLen = getUTF8CharLength(text.c_str(), charIndex);
+        int charLen = getUTF8CharLength(text.c_str(), renderIndex);
+        String currentChar = text.substring(renderIndex, renderIndex + charLen);
+        int charPixelWidth = u8g2.getUTF8Width(currentChar.c_str());
 
-        // 提取字符
-        String currentChar = text.substring(charIndex, charIndex + charLen);
-
-        // 计算添加此字符后的像素宽度
-        int charPixelWidth = (charLen > 1) ? CHINESE_CHAR_WIDTH : ASCII_CHAR_WIDTH;
-
-        if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) {
-          break; // 超出行宽，停止添加
-        }
+        if (linePixelWidth + charPixelWidth > DISPLAY_WIDTH) break;
 
         line += currentChar;
         linePixelWidth += charPixelWidth;
-        charIndex += charLen;
+        renderIndex += charLen;
       }
 
-      // 显示这一行
+      u8g2.setCursor(x, y);
       if (line.length() > 0) {
-        u8g2.setCursor(x, y);
         u8g2.print(line);
-        displayedText += line; // 记录显示的文本
       }
 
       y += lineAdvance;
-      lineCount++;
+
+      if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) break;
     }
-    // 显示页码（使用小字体，紧贴底部）
+
+    pageCharCount = renderIndex;
+
     u8g2.setFont(u8g2_font_6x10_tf);
     String pageInfo = String(pageNum + 1) + " / " + String(totalPages);
-    int pageInfoWidth = pageInfo.length() * 6;
-    // 将页码顶边放在底部保留区顶部：基线 = 顶边 + ascent
+    int pageInfoWidth = u8g2.getUTF8Width(pageInfo.c_str());
     u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - PAGE_NUM_HEIGHT + u8g2.getFontAscent());
     u8g2.print(pageInfo);
 
@@ -180,17 +181,12 @@ int displayText(const String& text, int pageNum, int totalPages) {
 
   displayPtr->hibernate();
 
-  totalCharsDisplayed = charIndex; // 更新为实际处理的字节数
-
-  //  打印所有参数,打印显示在屏幕的文字
-  Serial.printf("Displayed %d bytes, %d lines\n", totalCharsDisplayed, lineCount);
-  Serial.println("Displayed Text: " + displayedText);
-  return totalCharsDisplayed; // 返回实际显示的字节数
+  Serial.printf("Displayed %d bytes\n", pageCharCount);
+  return pageCharCount;
 }
 
 void displayMessage(const String& title, const String& message) {
-  if (!displayPtr)
-    return;
+  if (!displayPtr) return;
 
   displayPtr->setFullWindow();
   displayPtr->firstPage();
@@ -203,14 +199,12 @@ void displayMessage(const String& title, const String& message) {
     u8g2.setFontDirection(0);
     u8g2.setForegroundColor(GxEPD_BLACK);
     u8g2.setBackgroundColor(GxEPD_WHITE);
-
-    // 显示标题 - 使用中号字体
     u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-    int titleWidth = title.length() * 6; // 粗略估算
+
+    int titleWidth = title.length() * 6;
     u8g2.setCursor((SCREEN_WIDTH - titleWidth) / 2, 30);
     u8g2.print(title);
 
-    // 显示消息
     int msgWidth = message.length() * 6;
     u8g2.setCursor((SCREEN_WIDTH - msgWidth) / 2, SCREEN_HEIGHT / 2);
     u8g2.print(message);
@@ -220,26 +214,15 @@ void displayMessage(const String& title, const String& message) {
   displayPtr->hibernate();
 }
 
-// ============================================================================
-// Reading Functions
-// ============================================================================
-
 String readPageContent(File& file, long startPos) {
-  // 从指定位置开始读取
-  if (!file.seek(startPos)) {
-    return "";
-  }
+  if (!file.seek(startPos)) return "";
 
   String content = "";
   int bytesRead = 0;
-
-  // 对于中文，每个字符约3字节，一页约126字符 = 378字节
-  // 读取约3倍的字符数量以确保有足够内容（约1000字节）
-  int maxBytes = CHARS_PER_PAGE * 10; // 增加读取量以确保足够的内容
+  int maxBytes = CHARS_PER_LINE * LINES_PER_PAGE * 10;
 
   while (file.available() && bytesRead < maxBytes) {
-    char c = file.read();
-    content += c;
+    content += (char)file.read();
     bytesRead++;
   }
 
@@ -247,7 +230,6 @@ String readPageContent(File& file, long startPos) {
 }
 
 bool openBook(const String& bookName) {
-  // 关闭当前书籍
   if (reading.bookFile) {
     reading.bookFile.close();
   }
@@ -266,29 +248,39 @@ bool openBook(const String& bookName) {
 
   reading.currentBook = bookName;
   reading.currentPage = 0;
-  reading.currentFilePosition = 0; // 从文件开始位置
-  reading.pageHistoryCount = 0;    // 清空历史记录
-  reading.pagePositions[0] = 0;    // 第一页从0开始
+  reading.currentFilePosition = 0;
+  reading.pageHistoryCount = 0;
+  reading.pagePositions[0] = 0;
   reading.pageHistoryCount = 1;
-  reading.totalPages = (reading.bookFile.size() / CHARS_PER_PAGE) + 1; // 粗略估算
   reading.isReading = true;
 
-  Serial.printf("Opened book: %s (Estimated pages: %d)\n", bookName.c_str(), reading.totalPages);
+  const int kChunk = 2048;
+  long size = reading.bookFile.size();
+  long pos = 0;
+  int pages = 0;
+  while (pos < size) {
+    String chunk = readChunk(reading.bookFile, pos, kChunk);
+    if (chunk.length() == 0) break;
+    int consumed = calcPageBytes(chunk);
+    if (consumed <= 0) consumed = 1;
+    pos += consumed;
+    pages++;
+  }
+  reading.bookFile.seek(0);
+  reading.totalPages = pages;
 
-  // 显示第一页
+  Serial.printf("Opened book: %s (Pages: %d)\n", bookName.c_str(), reading.totalPages);
+
   String content = readPageContent(reading.bookFile, reading.currentFilePosition);
   int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
-  reading.currentFilePosition += charsDisplayed; // 更新文件位置
+  reading.currentFilePosition += charsDisplayed;
 
   return true;
 }
 
 void nextPage() {
-  if (!reading.isReading || !reading.bookFile) {
-    return;
-  }
+  if (!reading.isReading || !reading.bookFile) return;
 
-  // 检查是否还有内容
   if (reading.currentFilePosition >= reading.bookFile.size()) {
     Serial.println("Already at the last page");
     return;
@@ -296,25 +288,21 @@ void nextPage() {
 
   reading.currentPage++;
 
-  // 保存当前页的起始位置到历史记录
   if (reading.pageHistoryCount < MAX_PAGE_HISTORY) {
     reading.pagePositions[reading.pageHistoryCount] = reading.currentFilePosition;
     reading.pageHistoryCount++;
   }
 
-  // 从当前文件位置读取内容
   String content = readPageContent(reading.bookFile, reading.currentFilePosition);
   int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
-  reading.currentFilePosition += charsDisplayed; // 更新文件位置
+  reading.currentFilePosition += charsDisplayed;
 
   Serial.printf("Page: %d, File position: %ld / %ld\n", reading.currentPage + 1,
                 reading.currentFilePosition, reading.bookFile.size());
 }
 
 void prevPage() {
-  if (!reading.isReading || !reading.bookFile) {
-    return;
-  }
+  if (!reading.isReading || !reading.bookFile) return;
 
   if (reading.currentPage == 0) {
     Serial.println("Already at the first page");
@@ -323,16 +311,13 @@ void prevPage() {
 
   reading.currentPage--;
 
-  // 从历史记录中获取上一页的文件位置
   if (reading.currentPage < reading.pageHistoryCount) {
     long prevPosition = reading.pagePositions[reading.currentPage];
     reading.currentFilePosition = prevPosition;
 
-    // 读取并显示上一页
     String content = readPageContent(reading.bookFile, reading.currentFilePosition);
     int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
 
-    // 更新文件位置到这一页的结束位置
     reading.currentFilePosition = prevPosition + charsDisplayed;
 
     Serial.printf("Page: %d, File position: %ld / %ld\n", reading.currentPage + 1,
