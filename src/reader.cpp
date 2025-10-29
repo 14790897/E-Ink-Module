@@ -108,12 +108,24 @@ int displayText(const String& text, int pageNum, int totalPages) {
     u8g2.setBackgroundColor(GxEPD_WHITE);
     u8g2.setFont(u8g2_font_wqy12_t_gb2312); // WenQuanYi 12px 中文字体
 
+    // 计算字体指标与分页：使用真实的行进高度以充分利用屏幕
+    int fontAscent = u8g2.getFontAscent();     // 通常为正值
+    int fontDescent = u8g2.getFontDescent();   // 通常为负值
+    int lineAdvance = fontAscent - fontDescent; // 实际行高（基线到下一行基线）
+    int availableHeight = SCREEN_HEIGHT - MARGIN_TOP - PAGE_NUM_HEIGHT; // 预留页码区域
+    int linesPerPage = availableHeight / lineAdvance;
+
     // 显示文本内容
     int x = MARGIN_LEFT;
-    int y = MARGIN_TOP + LINE_HEIGHT; // U8g2字体的基线位置（需要加上字体高度，因为字体从基线向上绘制）
+    // 基线 = 顶边 + ascent，使首行完整可见
+    int y = MARGIN_TOP + fontAscent + 1; // 微调1px，避免面板顶部可能的裁切
 
 
-    while (charIndex < text.length() && lineCount < LINES_PER_PAGE) {
+    while (charIndex < text.length()) {
+      // 超出可用显示区域则停止（确保最后一行完整显示）
+      if (y - fontDescent > (SCREEN_HEIGHT - PAGE_NUM_HEIGHT)) {
+        break;
+      }
       String line = "";
       int linePixelWidth = 0; // 使用像素宽度而不是字符单位
 
@@ -153,14 +165,15 @@ int displayText(const String& text, int pageNum, int totalPages) {
         displayedText += line; // 记录显示的文本
       }
 
-      y += LINE_HEIGHT;
+      y += lineAdvance;
       lineCount++;
     }
     // 显示页码（使用小字体，紧贴底部）
     u8g2.setFont(u8g2_font_6x10_tf);
     String pageInfo = String(pageNum + 1) + " / " + String(totalPages);
     int pageInfoWidth = pageInfo.length() * 6;
-    u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - 2); // 改为-2，更接近底部
+    // 将页码顶边放在底部保留区顶部：基线 = 顶边 + ascent
+    u8g2.setCursor((SCREEN_WIDTH - pageInfoWidth) / 2, SCREEN_HEIGHT - PAGE_NUM_HEIGHT + u8g2.getFontAscent());
     u8g2.print(pageInfo);
 
   } while (displayPtr->nextPage());
