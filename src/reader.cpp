@@ -1,4 +1,5 @@
 ﻿#include "reader.h"
+#include "storage.h"
 
 const int SCREEN_WIDTH = EPD_HEIGHT; // 旋转后的实际宽度 = 212
 const int SCREEN_HEIGHT = EPD_WIDTH; // 旋转后的实际高度 = 112
@@ -291,6 +292,82 @@ bool openBook(const String& bookName) {
   int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
   reading.currentFilePosition += charsDisplayed;
 
+  // 保存阅读记录到NVS
+  saveReadingRecord(reading.currentBook, reading.currentFilePosition, reading.currentPage);
+
+  return true;
+}
+
+bool resumeReading() {
+  String bookName;
+  long filePosition;
+  int currentPage;
+
+  // 从NVS加载阅读记录
+  if (!loadReadingRecord(bookName, filePosition, currentPage)) {
+    Serial.println("No previous reading record found");
+    return false;
+  }
+
+  // 检查书籍是否存在
+  String path = "/books/" + bookName;
+  if (!LittleFS.exists(path)) {
+    Serial.println("Previous book not found: " + path);
+    clearReadingRecord();
+    return false;
+  }
+
+  if (reading.bookFile) {
+    reading.bookFile.close();
+  }
+
+  reading.bookFile = LittleFS.open(path, "r");
+  if (!reading.bookFile) {
+    Serial.println("Failed to open book: " + path);
+    return false;
+  }
+
+  reading.currentBook = bookName;
+  reading.currentPage = currentPage;
+  reading.currentFilePosition = filePosition;
+  reading.isReading = true;
+
+  // 计算总页数
+  const int kChunk = 2048;
+  long size = reading.bookFile.size();
+  long pos = 0;
+  int pages = 0;
+  while (pos < size) {
+    String chunk = readChunk(reading.bookFile, pos, kChunk);
+    if (chunk.length() == 0) break;
+    int consumed = calcPageBytes(chunk);
+    if (consumed <= 0) consumed = 1;
+    pos += consumed;
+    pages++;
+  }
+  reading.totalPages = pages;
+
+  // 重建页面历史记录
+  reading.pageHistoryCount = 0;
+  long historyPos = 0;
+  for (int p = 0; p <= currentPage && p < MAX_PAGE_HISTORY; p++) {
+    reading.pagePositions[reading.pageHistoryCount++] = historyPos;
+    if (p < currentPage) {
+      String chunk = readChunk(reading.bookFile, historyPos, kChunk);
+      if (chunk.length() == 0) break;
+      int consumed = calcPageBytes(chunk);
+      if (consumed <= 0) consumed = 1;
+      historyPos += consumed;
+    }
+  }
+
+  Serial.printf("Resumed reading: %s, page=%d/%d, pos=%ld\n",
+                bookName.c_str(), currentPage + 1, reading.totalPages, filePosition);
+
+  // 显示当前页
+  String content = readPageContent(reading.bookFile, reading.currentFilePosition);
+  displayText(content, reading.currentPage, reading.totalPages);
+
   return true;
 }
 
@@ -312,6 +389,9 @@ void nextPage() {
   String content = readPageContent(reading.bookFile, reading.currentFilePosition);
   int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
   reading.currentFilePosition += charsDisplayed;
+
+  // 保存阅读记录到NVS
+  saveReadingRecord(reading.currentBook, reading.currentFilePosition, reading.currentPage);
 
   Serial.printf("Page: %d, File position: %ld / %ld\n", reading.currentPage + 1,
                 reading.currentFilePosition, reading.bookFile.size());
@@ -335,6 +415,9 @@ void prevPage() {
     int charsDisplayed = displayText(content, reading.currentPage, reading.totalPages);
 
     reading.currentFilePosition = prevPosition + charsDisplayed;
+
+    // 保存阅读记录到NVS
+    saveReadingRecord(reading.currentBook, reading.currentFilePosition, reading.currentPage);
 
     Serial.printf("Page: %d, File position: %ld / %ld\n", reading.currentPage + 1,
                   reading.currentFilePosition, reading.bookFile.size());

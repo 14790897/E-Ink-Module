@@ -22,4 +22,12 @@ String getStorageInfo();
 String listBooks();
 bool deleteBook(const String& bookName);
 
+// ============================================================================
+// NVS Reading Record Functions
+// ============================================================================
+bool initNVS();
+bool saveReadingRecord(const String& bookName, long filePosition, int currentPage);
+bool loadReadingRecord(String& bookName, long& filePosition, int& currentPage);
+bool clearReadingRecord();
+
 #endif // STORAGE_H

@@ -152,6 +152,18 @@ void setup() {
   reading.currentPage = 0;
   reading.totalPages = 0;
 
+  // 初始化NVS
+  initNVS();
+
+  // 尝试从NVS恢复上次的阅读记录
+  Serial.println("Attempting to resume previous reading...");
+  if (resumeReading()) {
+    Serial.println("Successfully resumed previous reading");
+  } else {
+    Serial.println("No previous reading to resume or book not found");
+    displayMessage("Ready", "Upload books via web");
+  }
+
   Serial.println("System ready!");
   Serial.println("====================================");
   Serial.println("Access Information:");

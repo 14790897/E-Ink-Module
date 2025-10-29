@@ -44,6 +44,7 @@ void displayMessage(const String& title, const String& message);
 
 int getUTF8CharLength(const char* str, int index);
 bool openBook(const String& bookName);
+bool resumeReading();
 void nextPage();
 void prevPage();
 

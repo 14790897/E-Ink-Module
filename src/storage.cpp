@@ -4,7 +4,11 @@
 
 #include "storage.h"
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include "reader.h"
+
+// NVS命名空间
+Preferences preferences;
 
 // ============================================================================
 // LittleFS Functions
@@ -82,5 +86,66 @@ bool deleteBook(const String& bookName) {
     return LittleFS.remove(path);
   }
   return false;
+}
+
+// ============================================================================
+// NVS Reading Record Functions
+// ============================================================================
+
+bool initNVS() {
+  // Preferences会在begin时自动初始化NVS
+  return true;
+}
+
+bool saveReadingRecord(const String& bookName, long filePosition, int currentPage) {
+  if (!preferences.begin("reading", false)) {
+    Serial.println("Failed to open NVS namespace");
+    return false;
+  }
+
+  preferences.putString("bookName", bookName);
+  preferences.putLong("filePos", filePosition);
+  preferences.putInt("page", currentPage);
+
+  preferences.end();
+
+  Serial.printf("Saved reading record: %s, pos=%ld, page=%d\n",
+                bookName.c_str(), filePosition, currentPage);
+  return true;
+}
+
+bool loadReadingRecord(String& bookName, long& filePosition, int& currentPage) {
+  if (!preferences.begin("reading", true)) {
+    Serial.println("Failed to open NVS namespace");
+    return false;
+  }
+
+  bookName = preferences.getString("bookName", "");
+  filePosition = preferences.getLong("filePos", 0);
+  currentPage = preferences.getInt("page", 0);
+
+  preferences.end();
+
+  if (bookName.length() == 0) {
+    Serial.println("No reading record found in NVS");
+    return false;
+  }
+
+  Serial.printf("Loaded reading record: %s, pos=%ld, page=%d\n",
+                bookName.c_str(), filePosition, currentPage);
+  return true;
+}
+
+bool clearReadingRecord() {
+  if (!preferences.begin("reading", false)) {
+    Serial.println("Failed to open NVS namespace");
+    return false;
+  }
+
+  preferences.clear();
+  preferences.end();
+
+  Serial.println("Cleared reading record from NVS");
+  return true;
 }
 
