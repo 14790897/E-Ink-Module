@@ -9,6 +9,7 @@
 #include <LittleFS.h>
 #include <GxEPD2_BW.h>
 #include <U8g2_for_Adafruit_GFX.h>
+#include <vector>
 
 extern const int CHINESE_CHAR_WIDTH;
 extern const int LINE_HEIGHT;
@@ -41,8 +42,10 @@ extern ReadingState reading;
 void initDisplay(GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT>& display);
 int displayText(const String& text, int pageNum, int totalPages);
 void displayMessage(const String& title, const String& message);
+void displayBookList(const std::vector<String>& books, int selectedIndex);
 
 int getUTF8CharLength(const char* str, int index);
+String readPageContent(File& file, long startPos);
 bool openBook(const String& bookName);
 bool resumeReading();
 void nextPage();

@@ -231,6 +231,79 @@ void displayMessage(const String& title, const String& message) {
   displayPtr->hibernate();
 }
 
+void displayBookList(const std::vector<String>& books, int selectedIndex) {
+  if (!displayPtr) return;
+
+  displayPtr->setFullWindow();
+  displayPtr->firstPage();
+
+  do {
+    displayPtr->fillScreen(GxEPD_WHITE);
+    displayPtr->setTextColor(GxEPD_BLACK);
+
+    u8g2.setFontMode(1);
+    u8g2.setFontDirection(0);
+    u8g2.setForegroundColor(GxEPD_BLACK);
+    u8g2.setBackgroundColor(GxEPD_WHITE);
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+
+    // 显示标题
+    String title = "Book List";
+    int titleWidth = u8g2.getUTF8Width(title.c_str());
+    u8g2.setCursor((SCREEN_WIDTH - titleWidth) / 2, 15);
+    u8g2.print(title);
+
+    // 计算可显示的书籍数量
+    int lineHeight = 14;
+    int startY = 28;
+    int maxVisibleBooks = (SCREEN_HEIGHT - startY - 5) / lineHeight;
+
+    // 计算滚动窗口
+    int scrollStart = 0;
+    if (selectedIndex >= maxVisibleBooks) {
+      scrollStart = selectedIndex - maxVisibleBooks + 1;
+    }
+
+    // 显示书籍列表
+    for (int i = 0; i < maxVisibleBooks && (scrollStart + i) < books.size(); i++) {
+      int bookIndex = scrollStart + i;
+      int y = startY + i * lineHeight;
+
+      // 显示书籍名称（截断过长的名称）
+      String bookName = books[bookIndex];
+      int maxChars = (SCREEN_WIDTH - 15) / CHINESE_CHAR_WIDTH;
+      if (bookName.length() > maxChars * 3) { // UTF-8中文字符可能占3字节
+        bookName = bookName.substring(0, maxChars * 3 - 3) + "...";
+      }
+
+      // 如果是选中的项目,显示选择标记
+      if (bookIndex == selectedIndex) {
+        u8g2.setCursor(2, y);
+        u8g2.print(">");
+      } else {
+        u8g2.setCursor(2, y);
+        u8g2.print(" ");
+      }
+
+      // 显示书籍名称
+      u8g2.setCursor(15, y);
+      u8g2.print(bookName);
+    }
+
+    // 显示底部提示
+    u8g2.setFont(u8g2_font_6x10_tf);
+    String hint = String(selectedIndex + 1) + "/" + String(books.size());
+    int hintWidth = u8g2.getUTF8Width(hint.c_str());
+    u8g2.setCursor((SCREEN_WIDTH - hintWidth) / 2, SCREEN_HEIGHT - 2);
+    u8g2.print(hint);
+
+  } while (displayPtr->nextPage());
+
+  displayPtr->hibernate();
+
+  Serial.printf("Displayed book list: %d/%d selected\n", selectedIndex + 1, books.size());
+}
+
 String readPageContent(File& file, long startPos) {
   if (!file.seek(startPos)) return "";
 
